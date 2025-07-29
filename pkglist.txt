@@ -1,0 +1,3 @@
+aspnetcore-runtime-8.0
+dotnet-sdk-8.0
+libmagic-dev
