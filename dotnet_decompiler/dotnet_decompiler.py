@@ -21,14 +21,17 @@ class DotnetDecompiler(ServiceBase):
 
         if p.returncode != 0:
             errors = p.stderr
-            if "System.BadImageFormatException" in p.stderr:
+            if b"System.BadImageFormatException" in p.stderr:
                 # Not a Dotnet File
                 return
-            if "PEFileNotSupportedException" in errors:
+            if b"PEFileNotSupportedException" in errors:
                 # File not supported by ILSpy, probably not a Dotnet File
                 return
-            if "System.NullReferenceException: Object reference not set to an instance of an object" in errors:
+            if b"System.NullReferenceException: Object reference not set to an instance of an object" in errors:
                 # A real Dotnet File, but corrupted
+                return
+            if b"PE file does not contain any managed metadata" in errors:
+                # The PEReader couldn't find a Metadata File.
                 return
             # Unexpected error
             raise Exception(errors)
@@ -45,9 +48,18 @@ class DotnetDecompiler(ServiceBase):
         with open(decompiled_file_path, "r") as decompiled_file:
             for line in decompiled_file:
                 if line.startswith("[assembly: "):
+                    if "(" not in line or ")" not in line:
+                        # Information without a configuration value
+                        continue
                     k, v = line[11:].split("(", 1)
                     v = v[::-1].split(")", 1)[-1][::-1]
                     assembly_info.set_item(k, v)
+                elif assembly_info.body:
+                    # We could only parse Properties/AssemblyInfo.cs from the project extraction and it would be faster
+                    # than reading the whole concatenated decompiled result, but there some situations where the
+                    # concatenated decompiled result contains more information entries.
+                    # Since they are all in a single block, stop reading the file once we get over that block.
+                    break
 
         if assembly_info.body:
             request.result.add_section(assembly_info)
@@ -90,13 +102,18 @@ class DotnetDecompiler(ServiceBase):
         if p.returncode != 0:
             return
 
-        for root, _, files in os.walk(project_folder):
-            for f in files:
-                file_path = os.path.join(root, f)
-                request.add_supplementary(name=os.path.basename(file_path), description="Project file", path=file_path)
+        # Add the full project zip first, in case there ends up having a maximum on supplementary files
         shutil.make_archive(os.path.join(self.working_directory, "project"), "zip", project_folder)
         request.add_supplementary(
             name="project.zip", description="Project folder", path=os.path.join(self.working_directory, "project.zip")
         )
+
+        for root, _, files in os.walk(project_folder):
+            for f in files:
+                file_path = os.path.join(root, f)
+                rel_path = os.path.join(os.path.relpath(root, project_folder), f)
+                if rel_path.startswith("./"):
+                    rel_path = rel_path[2:]
+                request.add_supplementary(name=rel_path, description="Project file", path=file_path)
 
         # There is also the --generate-pdb option that could yield interesting information.
