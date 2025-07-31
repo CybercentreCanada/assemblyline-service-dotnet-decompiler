@@ -6,7 +6,11 @@ import subprocess
 
 from assemblyline_v4_service.common.base import ServiceBase
 from assemblyline_v4_service.common.request import ServiceRequest
-from assemblyline_v4_service.common.result import Result, ResultKeyValueSection
+from assemblyline_v4_service.common.result import (
+    Result,
+    ResultOrderedKeyValueSection,
+    ResultSection,
+)
 
 
 class DotnetDecompiler(ServiceBase):
@@ -43,17 +47,23 @@ class DotnetDecompiler(ServiceBase):
         if not os.path.exists(decompiled_file_path):
             raise Exception("No ILSpy decompilation found.")
 
-        assembly_info = ResultKeyValueSection("Assembly Information")
+        # ResultOrderedKeyValueSection allows duplicate keys
+        # Some samples are using multiple InternalsVisibleTo with different values
+        assembly_info = ResultOrderedKeyValueSection("Assembly Information")
+        information_keys = set()
 
         with open(decompiled_file_path, "r") as decompiled_file:
             for line in decompiled_file:
                 if line.startswith("[assembly: "):
                     if "(" not in line or ")" not in line:
                         # Information without a configuration value
-                        continue
-                    k, v = line[11:].split("(", 1)
-                    v = v[::-1].split(")", 1)[-1][::-1]
-                    assembly_info.set_item(k, v)
+                        k = line[11:].split("]", 1)[0]
+                        v = ""
+                    else:
+                        k, v = line[11:].split("(", 1)
+                        v = v[::-1].split(")", 1)[-1][::-1]
+                    assembly_info.add_item(k, v)
+                    information_keys.add(k)
                 elif assembly_info.body:
                     # We could only parse Properties/AssemblyInfo.cs from the project extraction and it would be faster
                     # than reading the whole concatenated decompiled result, but there some situations where the
@@ -63,6 +73,15 @@ class DotnetDecompiler(ServiceBase):
 
         if assembly_info.body:
             request.result.add_section(assembly_info)
+            if "SuppressIldasm" in information_keys:
+                ResultSection(
+                    "SuppressIldasm attribute found",
+                    body=(
+                        "Author wanted to reduce visibility on this code, "
+                        "it may be genuine, but this was seen in malicious samples too."
+                    ),
+                    parent=assembly_info,
+                )
 
         request.add_extracted(
             name=os.path.basename(decompiled_file_path), description="Decompiled file", path=decompiled_file_path
