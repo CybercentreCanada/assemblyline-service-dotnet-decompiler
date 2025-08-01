@@ -19,6 +19,28 @@ class DotnetDecompiler(ServiceBase):
     def execute(self, request: ServiceRequest):
         request.result = Result()
 
+        # In case decompilation is too mangled, the IL Code could give more hints as to what the executable is doing.
+        popenargs = [
+            "ilspycmd",
+            "--disable-updatecheck",
+            "--ilcode",
+            # "--il-sequence-points", # Show IL with sequence points.
+            "--outputdir",
+            self.working_directory,
+            request.file_path,
+        ]
+        p = subprocess.run(popenargs, capture_output=True)
+        if p.returncode == 0:
+            il_file_path = os.path.join(
+                self.working_directory, os.path.splitext(os.path.basename(request.file_path))[0] + ".il"
+            )
+            request.add_supplementary(
+                name=os.path.basename(il_file_path), description="IL Code file", path=il_file_path
+            )
+        else:
+            # IL Code should always be available.
+            raise Exception(p.stderr)
+
         # Start by decompiling everything as one file for further analysis
         popenargs = ["ilspycmd", "--disable-updatecheck", "--outputdir", self.working_directory, request.file_path]
         p = subprocess.run(popenargs, capture_output=True)
@@ -37,8 +59,11 @@ class DotnetDecompiler(ServiceBase):
             if b"PE file does not contain any managed metadata" in errors:
                 # The PEReader couldn't find a Metadata File.
                 return
-            # Unexpected error
-            raise Exception(errors)
+            # Tell the user about the unexpected error, but assume that the ILCode will still help.
+            ResultSection(
+                "ILSpyCmd Error", body=errors.decode("UTF8", errors="backslashreplace"), parent=request.result
+            )
+            return
 
         # ILSpy always extracts following the input filename
         decompiled_file_path = os.path.join(
@@ -86,25 +111,6 @@ class DotnetDecompiler(ServiceBase):
         request.add_extracted(
             name=os.path.basename(decompiled_file_path), description="Decompiled file", path=decompiled_file_path
         )
-
-        # In case decompilation is too mangled, the IL Code could give more hints as to what the executable is doing.
-        popenargs = [
-            "ilspycmd",
-            "--disable-updatecheck",
-            "--ilcode",
-            # "--il-sequence-points", # Show IL with sequence points.
-            "--outputdir",
-            self.working_directory,
-            request.file_path,
-        ]
-        p = subprocess.run(popenargs, capture_output=True)
-        if p.returncode == 0:
-            il_file_path = os.path.join(
-                self.working_directory, os.path.splitext(os.path.basename(request.file_path))[0] + ".il"
-            )
-            request.add_supplementary(
-                name=os.path.basename(il_file_path), description="IL Code file", path=il_file_path
-            )
 
         # For easier download, browsing, and compilation, split the project in multiple files
         project_folder = os.path.join(self.working_directory, "project")
