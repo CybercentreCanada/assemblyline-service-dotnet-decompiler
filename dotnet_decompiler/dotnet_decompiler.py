@@ -13,6 +13,23 @@ from assemblyline_v4_service.common.result import (
 )
 
 
+def should_raise_ilspycmd_exception(stderr):
+    if b"System.BadImageFormatException" in stderr:
+        # Not a Dotnet File
+        return False
+    if b"PEFileNotSupportedException" in stderr:
+        # File not supported by ILSpy, probably not a Dotnet File
+        return False
+    if b"System.NullReferenceException: Object reference not set to an instance of an object" in stderr:
+        # A real Dotnet File, but corrupted
+        return False
+    if b"PE file does not contain any managed metadata" in stderr:
+        # The PEReader couldn't find a Metadata File.
+        return False
+    # Unexpected decompilation error
+    return True
+
+
 class DotnetDecompiler(ServiceBase):
     """This Assemblyline service decompiles .NET dlls."""
 
@@ -37,7 +54,7 @@ class DotnetDecompiler(ServiceBase):
             request.add_supplementary(
                 name=os.path.basename(il_file_path), description="IL Code file", path=il_file_path
             )
-        else:
+        elif should_raise_ilspycmd_exception(p.stderr):
             # IL Code should always be available.
             raise Exception(p.stderr)
 
@@ -46,23 +63,11 @@ class DotnetDecompiler(ServiceBase):
         p = subprocess.run(popenargs, capture_output=True)
 
         if p.returncode != 0:
-            errors = p.stderr
-            if b"System.BadImageFormatException" in p.stderr:
-                # Not a Dotnet File
-                return
-            if b"PEFileNotSupportedException" in errors:
-                # File not supported by ILSpy, probably not a Dotnet File
-                return
-            if b"System.NullReferenceException: Object reference not set to an instance of an object" in errors:
-                # A real Dotnet File, but corrupted
-                return
-            if b"PE file does not contain any managed metadata" in errors:
-                # The PEReader couldn't find a Metadata File.
-                return
-            # Tell the user about the unexpected error, but assume that the ILCode will still help.
-            ResultSection(
-                "ILSpyCmd Error", body=errors.decode("UTF8", errors="backslashreplace"), parent=request.result
-            )
+            if should_raise_ilspycmd_exception(p.stderr):
+                # Tell the user about the unexpected error, but assume that the ILCode will still help.
+                ResultSection(
+                    "ILSpyCmd Error", body=p.stderr.decode("UTF8", errors="backslashreplace"), parent=request.result
+                )
             return
 
         # ILSpy always extracts following the input filename
