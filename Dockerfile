@@ -1,5 +1,10 @@
 ARG branch=latest
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS ilspy-build
+RUN dotnet tool install ilspycmd --tool-path /usr/bin
+
 FROM cccs/assemblyline-v4-service-base:$branch
+COPY --from=ilspy-build /usr/bin/ilspycmd /usr/bin/ilspycmd
+COPY --from=ilspy-build /usr/bin/.store/ilspycmd /usr/bin/.store/ilspycmd
 
 # Python path to the service class from your service directory
 ENV SERVICE_PATH=dotnet_decompiler.dotnet_decompiler.DotnetDecompiler
@@ -18,9 +23,6 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     $(grep -vE "^\s*(#|$)" /tmp/setup/pkglist.txt | tr "\n" " ") && \
     rm -rf /tmp/setup/pkglist.txt /var/lib/apt/lists/*
-
-# Install ILSpy
-RUN dotnet tool install ilspycmd --tool-path /usr/bin
 
 # Install python dependencies
 USER assemblyline
