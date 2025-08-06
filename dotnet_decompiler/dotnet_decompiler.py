@@ -57,6 +57,9 @@ class DotnetDecompiler(ServiceBase):
         elif should_raise_ilspycmd_exception(p.stderr):
             # IL Code should always be available.
             raise Exception(p.stderr)
+        else:
+            # A known error happened, no need to try full decompilation
+            return
 
         # Start by decompiling everything as one file for further analysis
         popenargs = ["ilspycmd", "--disable-updatecheck", "--outputdir", self.working_directory, request.file_path]
