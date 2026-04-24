@@ -1,6 +1,6 @@
 ARG branch=latest
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS ilspy-build
-RUN dotnet tool install ilspycmd --tool-path /usr/bin
+RUN dotnet tool install ilspycmd --version 9.1.0.7988 --tool-path /usr/bin
 
 FROM cccs/assemblyline-v4-service-base:$branch
 COPY --from=ilspy-build /usr/bin/ilspycmd /usr/bin/ilspycmd
