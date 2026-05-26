@@ -1,6 +1,5 @@
-"""This Assemblyline service decompiles .NET dlls."""
-
 import os
+import re
 import shutil
 import subprocess
 
@@ -10,6 +9,11 @@ from assemblyline_v4_service.common.result import (
     Result,
     ResultOrderedKeyValueSection,
     ResultSection,
+)
+
+ASSEMBLY_LOAD_PATTERN = re.compile(r"call\s+.*class\s+\[.*\]System\.Reflection\.Assembly\s*::\s*Load\s*\(\s*uint8\[\]")
+RESOURCE_STREAM_PATTERN = re.compile(
+    r"callvirt\s+.*class\s+\[.*\]System\.IO\.Stream\s*.*::\s*GetManifestResourceStream\s*\("
 )
 
 
@@ -31,8 +35,6 @@ def should_raise_ilspycmd_exception(stderr):
 
 
 class DotnetDecompiler(ServiceBase):
-    """This Assemblyline service decompiles .NET dlls."""
-
     def execute(self, request: ServiceRequest):
         request.result = Result()
 
@@ -54,6 +56,36 @@ class DotnetDecompiler(ServiceBase):
             request.add_supplementary(
                 name=os.path.basename(il_file_path), description="IL Code file", path=il_file_path
             )
+
+            il_detections = {"assembly_load": False, "resource_stream": False}
+            with open(il_file_path, "r", errors="backslashreplace") as f:
+                for line in f:
+                    if not il_detections["assembly_load"] and ASSEMBLY_LOAD_PATTERN.search(line):
+                        il_detections["assembly_load"] = True
+                    if not il_detections["resource_stream"] and RESOURCE_STREAM_PATTERN.search(line):
+                        il_detections["resource_stream"] = True
+                    if all(il_detections.values()):
+                        break
+
+            if il_detections["assembly_load"]:
+                ResultSection(
+                    "Assembly.Load(byte[]) Detected",
+                    body=(
+                        "This binary dynamically loads assemblies from byte arrays at runtime. "
+                        "This is a common technique for hiding payloads."
+                    ),
+                    parent=request.result,
+                )
+
+            if il_detections["resource_stream"]:
+                ResultSection(
+                    "GetManifestResourceStream Detected",
+                    body=(
+                        "This binary reads embedded resources at runtime. "
+                        "This is a common technique for hiding payloads."
+                    ),
+                    parent=request.result,
+                )
         elif should_raise_ilspycmd_exception(p.stderr):
             # IL Code should always be available.
             raise Exception(p.stderr)
