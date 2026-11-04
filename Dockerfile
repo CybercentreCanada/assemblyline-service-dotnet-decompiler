@@ -16,7 +16,7 @@ RUN apt-get update && \
     apt-get upgrade -y && \
     # Add the Linux Software Repository for Microsoft Products
     apt-get install wget -y --no-install-recommends && \
-    wget https://packages.microsoft.com/config/debian/11/packages-microsoft-prod.deb -O packages-microsoft-prod.deb && \
+    wget https://packages.microsoft.com/config/debian/13/packages-microsoft-prod.deb -O packages-microsoft-prod.deb && \
     dpkg -i packages-microsoft-prod.deb && \
     rm packages-microsoft-prod.deb && \
     apt-get update && \
